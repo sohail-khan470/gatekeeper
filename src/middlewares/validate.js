@@ -2,23 +2,23 @@
 import { AppError } from '../utils/AppError.js';
 
 export const validate = (schema) => (req, res, next) => {
-  try {
-    // parse throws an error if validation fails
-    // we pass req, and it checks req.body, req.query, req.params based on schema
-    schema.parse({
-      body: req.body,
-      query: req.query,
-      params: req.params,
-    });
+  const result = schema.safeParse({
+    body: req.body,
+    query: req.query,
+    params: req.params,
+  });
 
-    next(); // Validation passed, move to controller
-  } catch (error) {
-    console.log(error, 'EEEEE');
-    error.ZodError.map(() => console.log(e.mesage));
+  if (!result.success) {
+    // With safeParse, error is always result.error.issues
+    const errorMessage = result.error.issues.map((issue) => issue.message).join(', ');
 
-    // Zod errors contain an array of issues
-
-    // Pass a clean, standardized error to our global error handler
-    next(new AppError(400, errorMessage, 'VALIDATION_ERROR'));
+    return next(new AppError(400, errorMessage, 'VALIDATION_ERROR'));
   }
+
+  // Optional: Replace req with validated data
+  // req.body = result.data.body;
+  // req.query = result.data.query;
+  // req.params = result.data.params;
+
+  next();
 };
