@@ -19,3 +19,10 @@ export const createMessageSchema = z.object({
       .min(2, 'Author name must be at least 2 characters'),
   }),
 });
+
+export const getMessageSchema = z.object({
+  query: z.object({
+    limie: z.string().optional().default('10'),
+    cursor: z.string().optional(),
+  }),
+});

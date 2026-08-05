@@ -4,6 +4,7 @@ import { logger } from './utils/logger.js';
 import { notFound, errorHandler } from './middlewares/errorHandler.js';
 import { validate } from './middlewares/validate.js';
 import { createMessageSchema } from './validations/message.validation.js';
+import messageRoutes from './routes/messageRoutes.js';
 
 const app = express();
 
@@ -16,18 +17,7 @@ app.get('/health', (req, res) => {
 });
 
 // New validated route
-app.post('/api/messages', validate(createMessageSchema), (req, res) => {
-  // If we reach here, the data is guaranteed to be valid!
-  logger.info(`Received valid message from ${req.body.author}`);
-
-  res.status(201).json({
-    success: true,
-    data: {
-      message: 'Message created successfully',
-      receivedContent: req.body.content,
-    },
-  });
-});
+app.use('/api/messages', messageRoutes);
 
 // --- ERROR HANDLING ---
 app.use(notFound);
