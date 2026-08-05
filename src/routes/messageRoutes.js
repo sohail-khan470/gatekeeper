@@ -2,7 +2,7 @@
 import express from 'express';
 import { messageController } from '../controllers/messageController.js';
 import { validate } from '../middlewares/validate.js';
-import { createMessageSchema } from '../validations/message.validation.js';
+import { createMessageSchema, getMessageSchema } from '../validations/message.validation.js';
 
 const router = express.Router();
 
@@ -14,9 +14,11 @@ router.post(
 );
 
 // GET /api/messages
-router.get(
-  '/',
-  messageController.getMessages // 1. Control (no validation needed for simple GET)
-);
+// router.get(
+//   '/',
+//   messageController.getMessages // 1. Control (no validation needed for simple GET)
+// );
+// Apply validation to the GET route
+router.get('/', validate(getMessageSchema), messageController.getMessages);
 
 export default router;

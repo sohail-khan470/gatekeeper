@@ -20,13 +20,34 @@ class MessageController {
     }
   }
 
+  //   async getMessages(req, res, next) {
+  //     try {
+  //       const messages = await messageService.getMessages();
+
+  //       res.status(200).json({
+  //         success: true,
+  //         data: messages,
+  //       });
+  //     } catch (error) {
+  //       next(error);
+  //     }
+  //   }
+
   async getMessages(req, res, next) {
     try {
-      const messages = await messageService.getMessages();
+      // Zod parsed these as strings, convert limit to integer
+      const limit = parseInt(req.query.limit, 10);
+      const cursor = req.query.cursor;
+
+      const result = await messageService.getMessages(limit, cursor);
 
       res.status(200).json({
         success: true,
-        data: messages,
+        data: result.items,
+        pagination: {
+          nextCursor: result.nextCursor,
+          hasNextPage: result.nextCursor !== null,
+        },
       });
     } catch (error) {
       next(error);
