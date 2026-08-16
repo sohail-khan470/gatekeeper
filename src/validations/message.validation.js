@@ -20,7 +20,7 @@ export const createMessageSchema = z.object({
   }),
 });
 
-export const getMessageSchema = z.object({
+export const getMessagesSchema = z.object({
   query: z.object({
     limie: z.string().optional().default('10'),
     cursor: z.string().optional(),

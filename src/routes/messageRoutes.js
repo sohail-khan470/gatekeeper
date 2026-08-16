@@ -2,23 +2,25 @@
 import express from 'express';
 import { messageController } from '../controllers/messageController.js';
 import { validate } from '../middlewares/validate.js';
-import { createMessageSchema, getMessageSchema } from '../validations/message.validation.js';
+import { idempotency } from '../middlewares/idempotency.js';
+import { rateLimiter } from '../middlewares/rateLimiter.js'; // New!
+import { createMessageSchema, getMessagesSchema } from '../validations/message.validation.js';
 
 const router = express.Router();
 
-// POST /api/messages
 router.post(
   '/',
-  validate(createMessageSchema), // 1. Validate
-  messageController.createMessage // 2. Control
+  rateLimiter,    // 1. Check rate limit first
+  idempotency,    // 2. Check idempotency
+  validate(createMessageSchema), 
+  messageController.createMessage
 );
 
-// GET /api/messages
-// router.get(
-//   '/',
-//   messageController.getMessages // 1. Control (no validation needed for simple GET)
-// );
-// Apply validation to the GET route
-router.get('/', validate(getMessageSchema), messageController.getMessages);
+router.get(
+  '/',
+  rateLimiter,    // 1. Check rate limit first
+  validate(getMessagesSchema), 
+  messageController.getMessages
+);
 
 export default router;

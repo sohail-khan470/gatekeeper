@@ -2,9 +2,14 @@
 import crypto from 'crypto';
 import { redis } from '../config/redisClient.js';
 import { AppError } from '../utils/AppError.js';
+import { logger } from '../utils/logger.js';
 
 // 24 hours in seconds
 const IDEMPOTENCY_TTL = 24 * 60 * 60;
+const MAX_RETRIES = 10;
+const RETRY_DELAY_MS = 50;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const idempotency = async (req, res, next) => {
   const idempotencyKey = req.headers['idempotency-key'];
@@ -18,52 +23,69 @@ export const idempotency = async (req, res, next) => {
     // 1. Create a SHA-256 hash (fingerprint) of the raw JSON body
     const bodyFingerprint = crypto
       .createHash('sha256')
-      .update(JSON.stringify(req.body))
+      .update(JSON.stringify(req.body ?? {}))
       .digest('hex');
 
     const redisKey = `idemp:${idempotencyKey}`;
 
-    // 2. Try to set the key in Redis.
-    // NX means "Only set if it does NOT exist"
-    // EX sets the expiration time
-    const acquiredLock = await redis.set(redisKey, bodyFingerprint, 'EX', IDEMPOTENCY_TTL, 'NX');
+    // 2. Use HSETNX to atomically set the fingerprint field
+    // Returns 1 if the field was set (first request), 0 if it already existed (duplicate)
+    const isFirstRequest = await redis.hsetnx(redisKey, 'fingerprint', bodyFingerprint);
 
-    // 3. If acquiredLock is 'OK', this is the FIRST request. Let it proceed.
-    if (acquiredLock === 'OK') {
-      // We need to intercept res.json to save the response later
+    // 3. FIRST REQUEST: Lock acquired
+    if (isFirstRequest === 1) {
+      // Set expiration immediately to prevent orphaned locks
+      await redis.expire(redisKey, IDEMPOTENCY_TTL);
+
+      // Intercept res.json to save the response after it's sent
       const originalJson = res.json.bind(res);
       res.json = (body) => {
         // Only cache if the request was successful
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          redis.hset(redisKey, {
-            response: JSON.stringify(body),
-            statusCode: res.statusCode,
-          });
-          redis.expire(redisKey, IDEMPOTENCY_TTL); // Reset TTL
+          // Save response and status code as Hash fields
+          redis
+            .hset(redisKey, {
+              response: JSON.stringify(body),
+              statusCode: res.statusCode.toString(),
+            })
+            .then(() => redis.expire(redisKey, IDEMPOTENCY_TTL))
+            .catch((err) => {
+              console.error('Idempotency cache error:', err);
+              // Clean up on error to prevent stale locks
+              redis.del(redisKey).catch(() => {});
+            });
         } else {
-          // If it failed, delete the lock so they can retry
-          redis.del(redisKey);
+          // If it failed, delete the lock so they can retry with the same key
+          redis.del(redisKey).catch((err) => {
+            console.error('Idempotency delete error:', err);
+          });
         }
         return originalJson(body);
       };
+
       return next();
     }
 
-    // 4. If acquiredLock is null, the key ALREADY EXISTS. This is a duplicate request.
-    // Wait briefly for the first request to finish writing the response
+    // 4. DUPLICATE REQUEST: Lock already exists
     let storedData = await redis.hgetall(redisKey);
 
-    // Simple polling loop to wait for the first request to finish
+    // 5. Wait briefly for the first request to finish writing the response
     let retries = 0;
-    while (!storedData.response && retries < 10) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    while (!storedData.response && retries < MAX_RETRIES) {
+      await sleep(RETRY_DELAY_MS);
       storedData = await redis.hgetall(redisKey);
+
+      // If key was deleted (first request failed), allow this request to retry
+      if (!storedData || Object.keys(storedData).length === 0) {
+        // Key no longer exists, treat this as a new request
+        return idempotency(req, res, next);
+      }
+
       retries++;
     }
 
-    // 5. Check for body conflict
-    const storedFingerprint = storedData.fingerprint || (await redis.get(redisKey));
-    if (storedFingerprint !== bodyFingerprint) {
+    // 6. Check for body conflict
+    if (storedData.fingerprint !== bodyFingerprint) {
       throw new AppError(
         409,
         'Idempotency key was used with a different request body',
@@ -71,14 +93,21 @@ export const idempotency = async (req, res, next) => {
       );
     }
 
-    // 6. If response is ready, replay it
+    // 7. If response is ready, replay it
     if (storedData.response) {
-      return res.status(parseInt(storedData.statusCode, 10)).json(JSON.parse(storedData.response));
-    } else {
-      // If we timed out waiting, return a 409 Conflict
-      throw new AppError(409, 'Request is still processing', 'REQUEST_IN_PROGRESS');
+      const statusCode = parseInt(storedData.statusCode || '200', 10);
+      const responseBody = JSON.parse(storedData.response);
+      return res.status(statusCode).json(responseBody);
     }
+
+    // 8. If we timed out waiting, return a 409 Conflict
+    throw new AppError(
+      409,
+      'Request is still processing',
+      'REQUEST_IN_PROGRESS'
+    );
   } catch (error) {
+    // Pass any errors to the error handler
     next(error);
   }
 };
