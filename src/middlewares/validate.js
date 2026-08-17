@@ -2,23 +2,25 @@
 import { AppError } from '../utils/AppError.js';
 
 export const validate = (schema) => (req, res, next) => {
-  const result = schema.safeParse({
-    body: req.body,
-    query: req.query,
-    params: req.params,
-  });
+  try {
+    const parsed = schema.parse({
+      body: req.body,
+      query: req.query,
+      params: req.params,
+    });
 
-  if (!result.success) {
-    // With safeParse, error is always result.error.issues
-    const errorMessage = result.error.issues.map((issue) => issue.message).join(', ');
-
-    return next(new AppError(400, errorMessage, 'VALIDATION_ERROR'));
+    // Attach the parsed data to a custom property on the request object
+    req.validated = parsed;
+    
+    next();
+  } catch (error) {
+    const errorList = error.issues || error.errors;
+    
+    if (errorList && Array.isArray(errorList)) {
+      const errorMessage = errorList.map((err) => err.message).join(', ');
+      return next(new AppError(400, errorMessage, 'VALIDATION_ERROR'));
+    }
+    
+    return next(new AppError(400, error.message || 'Invalid request data', 'VALIDATION_ERROR'));
   }
-
-  // Optional: Replace req with validated data
-  // req.body = result.data.body;
-  // req.query = result.data.query;
-  // req.params = result.data.params;
-
-  next();
 };

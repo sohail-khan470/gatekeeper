@@ -4,40 +4,25 @@ import { messageService } from '../services/messageService.js';
 class MessageController {
   async createMessage(req, res, next) {
     try {
-      const { content, author } = req.body; // Already validated by Zod!
-
-      // Call the service
+      // Read from req.validated.body instead of req.body
+      const { content, author } = req.validated.body; 
+      
       const newMessage = await messageService.createMessage(content, author);
-
-      // Send standard response envelope
+      
       res.status(201).json({
         success: true,
         data: newMessage,
       });
     } catch (error) {
-      // Pass errors to the global error handler
       next(error);
     }
   }
 
-  //   async getMessages(req, res, next) {
-  //     try {
-  //       const messages = await messageService.getMessages();
-
-  //       res.status(200).json({
-  //         success: true,
-  //         data: messages,
-  //       });
-  //     } catch (error) {
-  //       next(error);
-  //     }
-  //   }
-
   async getMessages(req, res, next) {
     try {
-      // Zod parsed these as strings, convert limit to integer
-      const limit = parseInt(req.query.limit, 10);
-      const cursor = req.query.cursor;
+      // Read from req.validated.query instead of req.query
+      const limit = parseInt(req.validated.query.limit, 10);
+      const cursor = req.validated.query.cursor;
 
       const result = await messageService.getMessages(limit, cursor);
 
